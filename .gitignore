@@ -1,0 +1,13 @@
+# Build output
+SpotifyBar.app/
+*.dmg
+*.zip
+dmg-stage/
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Notary / signing scratch
+*.zip.lock
