@@ -18,8 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.action = #selector(togglePopover)
+            button.action = #selector(handleClick)
             button.target = self
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
             let host = PassthroughHostingView(rootView: MenuBarLabel(state: state))
             host.translatesAutoresizingMaskIntoConstraints = false
@@ -77,7 +78,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ceil((s as NSString).size(withAttributes: [.font: font]).width)
     }
 
-    @objc private func togglePopover() {
+    // Left-click opens the now-playing panel; right- or control-click shows a menu.
+    @objc private func handleClick() {
+        let event = NSApp.currentEvent
+        let isSecondary = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) ?? false)
+        if isSecondary {
+            showMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+
+        let open = NSMenuItem(title: "Open Spotify", action: #selector(openSpotify), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+
+        menu.addItem(.separator())
+
+        let quit = NSMenuItem(title: "Quit SpotifyBar", action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+
+        // Temporarily attach the menu so a click reveals it, then detach so left-click
+        // keeps opening the popover.
+        if popover.isShown { popover.performClose(nil) }
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func openSpotify() {
+        controller.activateSpotify()
+    }
+
+    @objc private func quit() {
+        NSApp.terminate(nil)
+    }
+
+    private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
