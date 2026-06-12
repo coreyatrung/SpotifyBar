@@ -32,6 +32,7 @@ swiftc -swift-version 5 -O -target x86_64-apple-macos13.0 "${SOURCES[@]}" -frame
 lipo -create "$BIN-arm64" "$BIN-x86_64" -output "$BIN"
 rm -f "$BIN-arm64" "$BIN-x86_64"
 cp Info.plist "$APP/Contents/Info.plist"
+cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 SIGN_ID="${SPOTIFYBAR_SIGN_ID:-}"
 if [ -n "$SIGN_ID" ]; then

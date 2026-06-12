@@ -9,5 +9,9 @@ dist/
 # macOS
 .DS_Store
 
+# Icon build intermediate (the .icns is committed; the iconset is regenerated)
+icon/AppIcon.iconset/
+icon/make_icon
+
 # Notary / signing scratch
 *.zip.lock

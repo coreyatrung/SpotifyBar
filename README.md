@@ -1,8 +1,8 @@
 # SpotifyBar
 
-A tiny Spotify controller that lives in your Mac menu bar. See what's playing at a glance, and control it without ever opening the full app.
+<img src="docs/icon.png" alt="SpotifyBar icon" width="120" align="right">
 
-![SpotifyBar in the menu bar](docs/screenshot.png)
+A tiny Spotify controller that lives in your Mac menu bar. See what's playing at a glance, and control it without ever opening the full app.
 
 ## What it does
 

@@ -24,6 +24,7 @@ swiftc -swift-version 5 -O \
 
 echo "→ Bundling"
 cp Info.plist "$APP/Contents/Info.plist"
+cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 echo "→ Ad-hoc signing (so macOS remembers the Automation permission)"
 codesign --force --deep --sign - "$APP"
