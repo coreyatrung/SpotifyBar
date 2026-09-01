@@ -6,103 +6,117 @@ struct MenuBarLabel: View {
     @ObservedObject var state: PlayerState
 
     var body: some View {
-        HStack(spacing: 6) {
+        Group {
+            if state.isPlaying {
+                // One timeline drives both the equalizer and the ticker.
+                //
+                // They used to run separate TimelineViews. Each one independently forced a
+                // full status item redraw, so the menu bar did twice the work for the same
+                // animation — and neither was rate-limited, so on a ProMotion display that
+                // was 240 status item redraws a second between them.
+                TimelineView(.animation(minimumInterval: MenuBarLayout.animationInterval)) { context in
+                    content(time: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                // Nothing playing: no timeline at all, so the app costs nothing at rest.
+                content(time: nil)
+            }
+        }
+        .frame(width: state.menuWidth, height: MenuBarLayout.height)
+    }
+
+    /// `time` nil means "not animating" — flat equalizer, static ticker.
+    private func content(time: Double?) -> some View {
+        HStack(spacing: MenuBarLayout.spacing) {
             if state.isRunning {
-                EqualizerIcon(active: state.isPlaying)
+                EqualizerIcon(time: time)
             } else {
                 Image(systemName: "music.note").font(.system(size: 12))
             }
 
             if state.isRunning, !state.title.isEmpty {
-                MarqueeText(text: "\(state.title) — \(state.artist)", window: state.tickerWindow)
-                    .font(.system(size: 12, weight: .medium))
-                Text(Self.fmt(state.position))
-                    .font(.system(size: 11))
-                    .monospacedDigit()
+                MarqueeText(text: Self.ticker(title: state.title, artist: state.artist),
+                            window: state.tickerWindow,
+                            scrollWidth: state.tickerScrollWidth,
+                            time: time)
+                    .font(Font(MenuBarLayout.tickerNSFont))
+                Text(TimeFormat.mmss(state.position))
+                    .font(Font(MenuBarLayout.timeNSFont))
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(width: state.menuWidth, height: 22)
     }
 
-    static func fmt(_ s: Double) -> String {
-        guard s.isFinite, s >= 0 else { return "0:00" }
-        let t = Int(s)
-        return String(format: "%d:%02d", t / 60, t % 60)
+    /// The exact string AppDelegate measures to size the status item. Both sides must
+    /// build it the same way, so they both call this.
+    static func ticker(title: String, artist: String) -> String {
+        artist.isEmpty ? title : "\(title) — \(artist)"
     }
 }
 
 /// Four bars whose heights wobble on sine waves while music plays; flat when paused/stopped.
+/// Driven by the shared clock in MenuBarLabel rather than a timeline of its own.
 struct EqualizerIcon: View {
-    let active: Bool
-    private let speeds: [Double] = [3.0, 4.3, 2.6, 3.7]
-    private let phases: [Double] = [0.0, 1.1, 2.0, 0.5]
+    let time: Double?
+
+    private static let barCount = 4
+    private static let barWidth: CGFloat = 2.5
+    private static let barSpacing: CGFloat = 2
+    private static let minBarHeight: CGFloat = 3
+    private static let maxBarHeight: CGFloat = 14
+    /// Deliberately unrelated so the bars never fall into a visible shared rhythm.
+    private static let speeds: [Double] = [3.0, 4.3, 2.6, 3.7]
+    private static let phases: [Double] = [0.0, 1.1, 2.0, 0.5]
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.05, paused: !active)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<4, id: \.self) { i in
-                    Capsule()
-                        .fill(.primary)
-                        .frame(width: 2.5, height: height(i, t))
-                }
+        HStack(alignment: .center, spacing: Self.barSpacing) {
+            ForEach(0..<Self.barCount, id: \.self) { index in
+                Capsule()
+                    .fill(.primary)
+                    .frame(width: Self.barWidth, height: height(index))
             }
-            .frame(width: 18, height: 14)
         }
+        .frame(width: MenuBarLayout.equalizerWidth, height: MenuBarLayout.equalizerHeight)
     }
 
-    private func height(_ i: Int, _ t: Double) -> CGFloat {
-        guard active else { return 3 }
-        let v = (sin(t * speeds[i] + phases[i]) + 1) / 2   // 0...1
-        return 3 + v * 11
+    private func height(_ index: Int) -> CGFloat {
+        guard let time else { return Self.minBarHeight }
+        let wave = (sin(time * Self.speeds[index] + Self.phases[index]) + 1) / 2   // 0...1
+        return Self.minBarHeight + wave * (Self.maxBarHeight - Self.minBarHeight)
     }
 }
 
 /// Scrolls text seamlessly (with a "·" separator) if it overflows `window`; otherwise static.
+///
+/// The widths come in from AppDelegate, which already measures this exact string with this
+/// exact font to size the status item. The view used to measure itself with a GeometryReader
+/// nested *inside* its animation timeline, so every frame re-laid-out the text and pushed a
+/// SwiftUI preference up the tree — at display refresh rate, forever.
 struct MarqueeText: View {
     let text: String
     let window: CGFloat
-    @State private var contentWidth: CGFloat = 0
-
-    private let speed: CGFloat = 30      // points per second
-    private let separator = "   ·   "
+    /// Total scroll distance, i.e. text + separator. Zero means it fits and shouldn't scroll.
+    let scrollWidth: CGFloat
+    /// Shared clock from MenuBarLabel. Nil means hold still.
+    let time: Double?
 
     var body: some View {
-        let full = text + separator
-        let needsScroll = contentWidth > window + 1
         ZStack(alignment: .leading) {
-            if needsScroll {
-                TimelineView(.animation) { ctx in
-                    let period = Double(contentWidth / speed)
-                    let elapsed = ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
-                    let offset = -CGFloat(elapsed) * speed
-                    HStack(spacing: 0) {
-                        measured(full)
-                        Text(full)
-                    }
-                    .fixedSize()
-                    .offset(x: offset)
+            if let time, scrollWidth > 0 {
+                let speed = MenuBarLayout.tickerScrollSpeed
+                let period = Double(scrollWidth / speed)
+                let elapsed = time.truncatingRemainder(dividingBy: period)
+                HStack(spacing: 0) {
+                    Text(text + MenuBarLayout.tickerSeparator)
+                    Text(text + MenuBarLayout.tickerSeparator)
                 }
+                .fixedSize()
+                .offset(x: -CGFloat(elapsed) * speed)
             } else {
-                measured(text)
+                Text(text).fixedSize()
             }
         }
-        .frame(width: window, height: 16, alignment: .leading)
+        .frame(width: window, height: MenuBarLayout.tickerHeight, alignment: .leading)
         .clipped()
-        .onPreferenceChange(TextWidthKey.self) { contentWidth = $0 }
     }
-
-    private func measured(_ s: String) -> some View {
-        Text(s)
-            .fixedSize()
-            .background(GeometryReader { g in
-                Color.clear.preference(key: TextWidthKey.self, value: g.size.width)
-            })
-    }
-}
-
-private struct TextWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

@@ -14,13 +14,22 @@ MACOS="$APP/Contents/MacOS"
 BIN="$MACOS/SpotifyBar"
 DMG="SpotifyBar.dmg"
 SOURCES=(
+  Sources/Layout.swift
+  Sources/Formatting.swift
   Sources/SpotifyController.swift
+  Sources/TrackChangeDetector.swift
   Sources/PlayerState.swift
+  Sources/ArtworkLoader.swift
   Sources/MenuBarLabel.swift
   Sources/NowPlayingView.swift
+  Sources/TrackToast.swift
   Sources/AppDelegate.swift
   Sources/main.swift
 )
+
+VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)"
+BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Info.plist)"
+echo "→ SpotifyBar $VERSION (build $BUILD)"
 
 echo "→ Cleaning"
 rm -rf "$APP" "$DMG" dmg-stage
@@ -63,4 +72,4 @@ if [ -n "$SIGN_ID" ] && [ -n "${SPOTIFYBAR_NOTARY:-}" ]; then
   echo "✓ Notarized + stapled."
 fi
 
-echo "✓ Built $DMG  ($(lipo -archs "$BIN"))"
+echo "✓ Built $DMG — v$VERSION (build $BUILD), $(lipo -archs "$BIN")"

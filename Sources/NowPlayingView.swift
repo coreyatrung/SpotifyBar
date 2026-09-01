@@ -2,54 +2,52 @@ import SwiftUI
 
 struct NowPlayingView: View {
     @ObservedObject var state: PlayerState
+    /// Shared with the track-change toast and driven by AppDelegate, so the artwork for a
+    /// track is fetched once and both views use it.
+    @ObservedObject var artwork: ArtworkLoader
     let controller: SpotifyController
 
-    @State private var scrubPos: Double = 0
+    @State private var scrubPosition: Double = 0
     @State private var isScrubbing = false
     @State private var localVolume: Double = 50
-    @State private var isVolEditing = false
+    @State private var isVolumeEditing = false
 
     var body: some View {
         Group {
             if state.permissionDenied {
-                permissionPrompt.padding(16)
+                permissionPrompt.padding(PanelLayout.padding)
             } else {
                 player
             }
         }
-        .frame(width: 280)
+        .frame(width: PanelLayout.width)
         .background(background)
+        .onAppear { localVolume = state.volume }
     }
 
     // MARK: - Player
 
     private var player: some View {
         VStack(spacing: 14) {
-            artwork
+            artworkView
             trackInfo
             seekBar
             controls
             volumeBar
         }
-        .padding(16)
+        .padding(PanelLayout.padding)
     }
 
-    private var artwork: some View {
+    private var artworkView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.25))
-            if let url = URL(string: state.artworkURL), !state.artworkURL.isEmpty {
-                AsyncImage(url: url) { phase in
-                    if let img = phase.image {
-                        img.resizable().scaledToFill()
-                    } else {
-                        placeholder
-                    }
-                }
+            if let cover = artwork.cover {
+                Image(nsImage: cover).resizable().scaledToFill()
             } else {
                 placeholder
             }
         }
-        .frame(width: 220, height: 220)
+        .frame(width: PanelLayout.artworkSide, height: PanelLayout.artworkSide)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         .onTapGesture { controller.activateSpotify() }
@@ -68,65 +66,77 @@ struct NowPlayingView: View {
                 .font(.headline)
                 .foregroundStyle(.white)
                 .lineLimit(1).truncationMode(.tail)
-            Text(state.artist)
+            Text(displaySubtitle)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.7))
                 .lineLimit(1).truncationMode(.tail)
         }
     }
 
+    /// A failed read used to be reported as "Spotify not open", which was wrong and
+    /// unhelpful whenever Spotify was open but a property came back empty.
     private var displayTitle: String {
-        if !state.isRunning { return "Spotify not open" }
-        if state.title.isEmpty { return "Nothing playing" }
-        return state.title
+        switch state.status {
+        case .notRunning: return "Spotify not open"
+        case .permissionDenied: return "Permission needed"
+        case .unreadable: return "Can't read Spotify"
+        case .ok: return state.title.isEmpty ? "Nothing playing" : state.title
+        }
+    }
+
+    private var displaySubtitle: String {
+        switch state.status {
+        case .ok: return state.artist
+        case .unreadable: return "Spotify didn't answer — try again in a moment"
+        default: return ""
+        }
     }
 
     // MARK: - Seek bar
 
     private var seekBar: some View {
-        let shown = isScrubbing ? scrubPos : state.position
+        let shown = isScrubbing ? scrubPosition : state.position
         return VStack(spacing: 6) {
-            GeometryReader { geo in
-                let dur = max(state.duration, 1)
-                let fraction = min(max(shown / dur, 0), 1)
+            GeometryReader { geometry in
+                let duration = state.duration
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.25))
-                    Capsule().fill(.white).frame(width: geo.size.width * fraction)
+                    Capsule().fill(.white)
+                        .frame(width: geometry.size.width * clampedFraction(shown, of: duration))
                 }
                 .frame(height: 4)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
-                        .onChanged { v in
+                        .onChanged { value in
                             isScrubbing = true
-                            scrubPos = frac(v.location.x, geo.size.width) * dur
+                            scrubPosition = fractionAlong(value.location.x, width: geometry.size.width) * duration
                         }
-                        .onEnded { v in
-                            let target = frac(v.location.x, geo.size.width) * dur
-                            scrubPos = target
+                        .onEnded { value in
+                            let target = fractionAlong(value.location.x, width: geometry.size.width) * duration
                             controller.seek(to: target)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { isScrubbing = false }
+                            // Show it straight away and ignore polls until Spotify catches up.
+                            state.holdPosition(target)
+                            isScrubbing = false
                         }
                 )
             }
             .frame(height: 14)
 
             HStack {
-                Text(fmt(shown))
+                Text(TimeFormat.mmss(shown))
                 Spacer()
-                Text("-" + fmt(max(state.duration - shown, 0)))
+                Text("-" + TimeFormat.mmss(max(state.duration - shown, 0)))
             }
             .font(.caption2)
             .monospacedDigit()
             .foregroundStyle(.white.opacity(0.7))
         }
         .opacity(state.duration > 0 ? 1 : 0)
-    }
-
-    private func frac(_ x: CGFloat, _ w: CGFloat) -> Double {
-        guard w > 0 else { return 0 }
-        return Double(min(max(x / w, 0), 1))
+        // The transport buttons were disabled when Spotify was closed but the scrubber
+        // wasn't, so it could be dragged, firing seeks into nothing.
+        .disabled(!state.isRunning || state.duration <= 0)
     }
 
     // MARK: - Controls
@@ -137,7 +147,7 @@ struct NowPlayingView: View {
                 Image(systemName: "backward.fill").font(.title2)
             }
             Button {
-                state.stateValue = state.isPlaying ? .paused : .playing   // optimistic flip
+                state.optimisticallyTogglePlayback()
                 controller.playPause()
             } label: {
                 Image(systemName: state.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -158,8 +168,12 @@ struct NowPlayingView: View {
         HStack(spacing: 8) {
             Image(systemName: "speaker.fill").font(.caption2)
             Slider(value: $localVolume, in: 0...100) { editing in
-                isVolEditing = editing
-                if !editing { controller.setVolume(Int(localVolume)) }
+                isVolumeEditing = editing
+                guard !editing else { return }
+                controller.setVolume(Int(localVolume.rounded()))
+                // Same hold as the scrubber. Without it the next poll reported the old
+                // volume and the slider jumped back before jumping forward again.
+                state.holdVolume(localVolume)
             }
             .tint(.white)
             Image(systemName: "speaker.wave.3.fill").font(.caption2)
@@ -167,27 +181,22 @@ struct NowPlayingView: View {
         .foregroundStyle(.white.opacity(0.7))
         .disabled(!state.isRunning)
         .onChange(of: state.volume) { newVolume in
-            if !isVolEditing { localVolume = newVolume }
+            if !isVolumeEditing { localVolume = newVolume }
         }
-        .onAppear { localVolume = state.volume }
     }
 
     // MARK: - Background
 
     private var background: some View {
         ZStack {
-            if let url = URL(string: state.artworkURL), !state.artworkURL.isEmpty {
-                AsyncImage(url: url) { phase in
-                    if let img = phase.image {
-                        img.resizable().scaledToFill()
-                    } else {
-                        Color.black
-                    }
-                }
-                .blur(radius: 40)
-                .opacity(0.7)
-            } else {
-                Color.black
+            Color.black
+            // Already blurred and downsampled by ArtworkLoader, so there's no per-frame
+            // GPU blur here any more.
+            if let backdrop = artwork.background {
+                Image(nsImage: backdrop)
+                    .resizable()
+                    .scaledToFill()
+                    .opacity(0.7)
             }
             Rectangle().fill(.ultraThinMaterial)
             LinearGradient(
@@ -196,12 +205,6 @@ struct NowPlayingView: View {
             )
         }
         .clipped()
-    }
-
-    private func fmt(_ s: Double) -> String {
-        guard s.isFinite, s >= 0 else { return "0:00" }
-        let total = Int(s)
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Permission prompt

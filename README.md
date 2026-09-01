@@ -8,9 +8,10 @@ A tiny Spotify controller that lives in your Mac menu bar. See what's playing at
 
 - **Live ticker** — the current song and artist scroll past in the menu bar, with an animated equalizer and the elapsed time.
 - **Now-playing panel** — click the menu bar item for album art, a draggable scrubber, play/pause/skip, and a volume slider.
-- **Stays out of the way** — no Dock icon, launches into the menu bar, sips resources.
+- **Track-change toast** — when the song changes, a small card drops out from under the menu bar icon with the album art, title and artist, then fades. Hover to keep it up, click to jump to Spotify, and turn it off from the right-click menu.
+- **Stays out of the way** — no Dock icon, launches into the menu bar, and stays quiet: it won't interrupt you when the panel is already open, when Spotify itself is in front, or when you're in a fullscreen app, and it never steals keyboard focus.
 
-It talks to the Spotify desktop app directly on your Mac (over AppleScript), so there's **no login, no account linking, and no data leaves your machine.**
+It talks to the Spotify desktop app directly on your Mac (over AppleScript), so there's **no login and no account linking.**
 
 ## Install
 
@@ -30,8 +31,11 @@ You don't need Xcode's interface — just the command-line tools.
 git clone https://github.com/coreyatrung/SpotifyBar.git
 cd SpotifyBar
 ./build.sh            # builds SpotifyBar.app for your Mac
+./test.sh             # runs the unit tests
 open SpotifyBar.app
 ```
+
+Rebuilding changes the ad-hoc signature, so macOS will usually ask for Automation access again. That's expected.
 
 To produce a universal (Intel + Apple Silicon) DMG for distribution:
 
@@ -39,13 +43,19 @@ To produce a universal (Intel + Apple Silicon) DMG for distribution:
 ./release.sh          # builds a universal SpotifyBar.app + SpotifyBar.dmg
 ```
 
+Bump `CFBundleShortVersionString` and `CFBundleVersion` in `Info.plist` before cutting a release — `release.sh` prints both so you can tell builds apart once they're out in the world.
+
 ## How it works
 
-A small AppKit menu bar app hosting SwiftUI views. A timer polls Spotify once a second via AppleScript (`NSAppleScript`) for the track, artwork URL, position, and volume, and the same channel sends play/pause/skip/seek/volume commands back. That's the whole thing — no network calls, no Spotify Web API, no credentials.
+A small AppKit menu bar app hosting SwiftUI views. A timer polls Spotify via AppleScript (`NSAppleScript`) for the track, artwork URL, position, and volume, and the same channel sends play/pause/skip/seek/volume commands back. Polling runs on a background queue so a busy Spotify can't freeze the menu bar, and it backs off when there's nothing to watch — once a second while music is playing, every three seconds when it's paused, every five when Spotify is closed.
+
+The one thing that isn't local is the album art: the AppleScript gives us a URL, and the app downloads that image from Spotify's CDN. No Spotify Web API, no credentials, no account.
 
 ## Privacy
 
-SpotifyBar makes no network requests of its own. The only data it touches is what the Spotify app already exposes locally, and it stays on your Mac.
+Everything SpotifyBar knows about your listening comes from the Spotify app already running on your Mac, and none of it is sent anywhere. There's no account, no login, no analytics, and no telemetry.
+
+SpotifyBar makes exactly one kind of network request: it downloads the current album cover from Spotify's image CDN, using the URL Spotify itself hands over. That's an anonymous image fetch, once per track. Nothing else leaves your machine.
 
 ## License
 
